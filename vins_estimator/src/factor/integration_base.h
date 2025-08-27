@@ -6,6 +6,10 @@
 #include <ceres/ceres.h>
 using namespace Eigen;
 
+/**
+ * @brief IMU预积分类
+ * 
+ */
 class IntegrationBase
 {
   public:
@@ -18,6 +22,7 @@ class IntegrationBase
           sum_dt{0.0}, delta_p{Eigen::Vector3d::Zero()}, delta_q{Eigen::Quaterniond::Identity()}, delta_v{Eigen::Vector3d::Zero()}
 
     {
+        // 设置噪声协方差矩阵
         noise = Eigen::Matrix<double, 18, 18>::Zero();
         noise.block<3, 3>(0, 0) =  (ACC_N * ACC_N) * Eigen::Matrix3d::Identity();
         noise.block<3, 3>(3, 3) =  (GYR_N * GYR_N) * Eigen::Matrix3d::Identity();
@@ -27,6 +32,13 @@ class IntegrationBase
         noise.block<3, 3>(15, 15) =  (GYR_W * GYR_W) * Eigen::Matrix3d::Identity();
     }
 
+    /**
+     * @brief 添加新的IMU数据，向前传播
+     * 
+     * @param dt 
+     * @param acc 
+     * @param gyr 
+     */
     void push_back(double dt, const Eigen::Vector3d &acc, const Eigen::Vector3d &gyr)
     {
         dt_buf.push_back(dt);
@@ -35,6 +47,12 @@ class IntegrationBase
         propagate(dt, acc, gyr);
     }
 
+    /**
+     * @brief 更新bg、ba后，重新计算预积分
+     * 
+     * @param _linearized_ba 
+     * @param _linearized_bg 
+     */
     void repropagate(const Eigen::Vector3d &_linearized_ba, const Eigen::Vector3d &_linearized_bg)
     {
         sum_dt = 0.0;
@@ -51,6 +69,26 @@ class IntegrationBase
             propagate(dt_buf[i], acc_buf[i], gyr_buf[i]);
     }
 
+    /**
+     * @brief 中值积分方式计算预积分
+     * 
+     * @param _dt 
+     * @param _acc_0 
+     * @param _gyr_0 
+     * @param _acc_1 
+     * @param _gyr_1 
+     * @param delta_p 
+     * @param delta_q 
+     * @param delta_v 
+     * @param linearized_ba 
+     * @param linearized_bg 
+     * @param result_delta_p 
+     * @param result_delta_q 
+     * @param result_delta_v 
+     * @param result_linearized_ba 
+     * @param result_linearized_bg 
+     * @param update_jacobian 
+     */
     void midPointIntegration(double _dt, 
                             const Eigen::Vector3d &_acc_0, const Eigen::Vector3d &_gyr_0,
                             const Eigen::Vector3d &_acc_1, const Eigen::Vector3d &_gyr_1,
@@ -59,6 +97,7 @@ class IntegrationBase
                             Eigen::Vector3d &result_delta_p, Eigen::Quaterniond &result_delta_q, Eigen::Vector3d &result_delta_v,
                             Eigen::Vector3d &result_linearized_ba, Eigen::Vector3d &result_linearized_bg, bool update_jacobian)
     {
+        // 递推计算当前的预积分量
         //ROS_INFO("midpoint integration");
         Vector3d un_acc_0 = delta_q * (_acc_0 - linearized_ba);
         Vector3d un_gyr = 0.5 * (_gyr_0 + _gyr_1) - linearized_bg;
@@ -77,6 +116,7 @@ class IntegrationBase
             Vector3d a_1_x = _acc_1 - linearized_ba;
             Matrix3d R_w_x, R_a_0_x, R_a_1_x;
 
+            // 计算几个反对称矩阵
             R_w_x<<0, -w_x(2), w_x(1),
                 w_x(2), 0, -w_x(0),
                 -w_x(1), w_x(0), 0;
@@ -105,6 +145,7 @@ class IntegrationBase
             F.block<3, 3>(12, 12) = Matrix3d::Identity();
             //cout<<"A"<<endl<<A<<endl;
 
+            // 前四行与推导结果差一个负号，但是因为噪声都是 0 均值的高斯白噪声，所以加还是减影响不大
             MatrixXd V = MatrixXd::Zero(15,18);
             V.block<3, 3>(0, 0) =  0.25 * delta_q.toRotationMatrix() * _dt * _dt;
             V.block<3, 3>(0, 3) =  0.25 * -result_delta_q.toRotationMatrix() * R_a_1_x  * _dt * _dt * 0.5 * _dt;
@@ -127,6 +168,13 @@ class IntegrationBase
 
     }
 
+    /**
+     * @brief 根据新的IMU数据，向前传播
+     * 
+     * @param _dt 
+     * @param _acc_1 
+     * @param _gyr_1 
+     */
     void propagate(double _dt, const Eigen::Vector3d &_acc_1, const Eigen::Vector3d &_gyr_1)
     {
         dt = _dt;
@@ -157,6 +205,21 @@ class IntegrationBase
      
     }
 
+    /**
+     * @brief 计算残差
+     * 
+     * @param Pi 
+     * @param Qi 
+     * @param Vi 
+     * @param Bai 
+     * @param Bgi 
+     * @param Pj 
+     * @param Qj 
+     * @param Vj 
+     * @param Baj 
+     * @param Bgj 
+     * @return Eigen::Matrix<double, 15, 1> 
+     */
     Eigen::Matrix<double, 15, 1> evaluate(const Eigen::Vector3d &Pi, const Eigen::Quaterniond &Qi, const Eigen::Vector3d &Vi, const Eigen::Vector3d &Bai, const Eigen::Vector3d &Bgi,
                                           const Eigen::Vector3d &Pj, const Eigen::Quaterniond &Qj, const Eigen::Vector3d &Vj, const Eigen::Vector3d &Baj, const Eigen::Vector3d &Bgj)
     {
@@ -173,10 +236,12 @@ class IntegrationBase
         Eigen::Vector3d dba = Bai - linearized_ba;
         Eigen::Vector3d dbg = Bgi - linearized_bg;
 
+        // 根据bg和ba的变化量，修正预积分量
         Eigen::Quaterniond corrected_delta_q = delta_q * Utility::deltaQ(dq_dbg * dbg);
         Eigen::Vector3d corrected_delta_v = delta_v + dv_dba * dba + dv_dbg * dbg;
         Eigen::Vector3d corrected_delta_p = delta_p + dp_dba * dba + dp_dbg * dbg;
 
+        // 计算残差
         residuals.block<3, 1>(O_P, 0) = Qi.inverse() * (0.5 * G * sum_dt * sum_dt + Pj - Pi - Vi * sum_dt) - corrected_delta_p;
         residuals.block<3, 1>(O_R, 0) = 2 * (corrected_delta_q.inverse() * (Qi.inverse() * Qj)).vec();
         residuals.block<3, 1>(O_V, 0) = Qi.inverse() * (G * sum_dt + Vj - Vi) - corrected_delta_v;

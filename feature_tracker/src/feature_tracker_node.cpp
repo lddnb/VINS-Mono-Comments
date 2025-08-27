@@ -25,8 +25,14 @@ bool first_image_flag = true;
 double last_image_time = 0;
 bool init_pub = 0;
 
+/**
+ * @brief 图像回调函数
+ * 
+ * @param img_msg 
+ */
 void img_callback(const sensor_msgs::ImageConstPtr &img_msg)
 {
+    // 第一张图，做初始化
     if(first_image_flag)
     {
         first_image_flag = false;
@@ -35,6 +41,7 @@ void img_callback(const sensor_msgs::ImageConstPtr &img_msg)
         return;
     }
     // detect unstable camera stream
+    // 检测图像时间戳的连续性，不连续的图像视为图像丢失，重置特征跟踪器
     if (img_msg->header.stamp.toSec() - last_image_time > 1.0 || img_msg->header.stamp.toSec() < last_image_time)
     {
         ROS_WARN("image discontinue! reset the feature tracker!");
@@ -48,10 +55,13 @@ void img_callback(const sensor_msgs::ImageConstPtr &img_msg)
     }
     last_image_time = img_msg->header.stamp.toSec();
     // frequency control
+    // 发布频率控制，当前频率小于设定频率，就发布
     if (round(1.0 * pub_count / (img_msg->header.stamp.toSec() - first_image_time)) <= FREQ)
     {
         PUB_THIS_FRAME = true;
         // reset the frequency control
+        // 重置频率控制，防止长时间运行导致的累积误差
+        // 随着时间推移，计算的分母不断增大，使得频率控制变得越来越不精确
         if (abs(1.0 * pub_count / (img_msg->header.stamp.toSec() - first_image_time) - FREQ) < 0.01 * FREQ)
         {
             first_image_time = img_msg->header.stamp.toSec();
@@ -61,6 +71,7 @@ void img_callback(const sensor_msgs::ImageConstPtr &img_msg)
     else
         PUB_THIS_FRAME = false;
 
+    // 获取图像
     cv_bridge::CvImageConstPtr ptr;
     if (img_msg->encoding == "8UC1")
     {
@@ -81,11 +92,13 @@ void img_callback(const sensor_msgs::ImageConstPtr &img_msg)
     TicToc t_r;
     for (int i = 0; i < NUM_OF_CAM; i++)
     {
+        // 跟踪特征点
         ROS_DEBUG("processing camera %d", i);
         if (i != 1 || !STEREO_TRACK)
             trackerData[i].readImage(ptr->image.rowRange(ROW * i, ROW * (i + 1)), img_msg->header.stamp.toSec());
         else
         {
+            // 均衡化处理，处理图像的光照不均匀，过亮或过暗的情况
             if (EQUALIZE)
             {
                 cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE();
@@ -100,6 +113,7 @@ void img_callback(const sensor_msgs::ImageConstPtr &img_msg)
 #endif
     }
 
+    // 更新特征点的ID
     for (unsigned int i = 0;; i++)
     {
         bool completed = false;
@@ -112,6 +126,10 @@ void img_callback(const sensor_msgs::ImageConstPtr &img_msg)
 
    if (PUB_THIS_FRAME)
    {
+        // 发布特征点
+        // id、xyz、uv、velocity，其中uv是没去畸变的
+        // xyz是归一化平面上的坐标，去畸变的，z为1，uv是原始图像上的像素坐标，未去畸变的
+        // velocity为当前帧相对前一帧特征点沿 x,y 方向的像素移动速度
         pub_count++;
         sensor_msgs::PointCloudPtr feature_points(new sensor_msgs::PointCloud);
         sensor_msgs::ChannelFloat32 id_of_point;
@@ -132,6 +150,7 @@ void img_callback(const sensor_msgs::ImageConstPtr &img_msg)
             auto &pts_velocity = trackerData[i].pts_velocity;
             for (unsigned int j = 0; j < ids.size(); j++)
             {
+                // track_cnt>1 说明只发布当前帧观测到的之前已有的特征点，但是不包括在当前帧新提取的点
                 if (trackerData[i].track_cnt[j] > 1)
                 {
                     int p_id = ids[j];
@@ -164,6 +183,7 @@ void img_callback(const sensor_msgs::ImageConstPtr &img_msg)
         else
             pub_img.publish(feature_points);
 
+        // 发布提取了特征点的图像
         if (SHOW_TRACK)
         {
             ptr = cv_bridge::cvtColor(ptr, sensor_msgs::image_encodings::BGR8);
@@ -213,6 +233,7 @@ int main(int argc, char **argv)
     for (int i = 0; i < NUM_OF_CAM; i++)
         trackerData[i].readIntrinsicParameter(CAM_NAMES[i]);
 
+    // 对于鱼眼相机，加载mask
     if(FISHEYE)
     {
         for (int i = 0; i < NUM_OF_CAM; i++)
@@ -228,10 +249,14 @@ int main(int argc, char **argv)
         }
     }
 
+    // 订阅图像
     ros::Subscriber sub_img = n.subscribe(IMAGE_TOPIC, 100, img_callback);
 
+    // 发布特征点
     pub_img = n.advertise<sensor_msgs::PointCloud>("feature", 1000);
+    // 发布提取了特征点的图像
     pub_match = n.advertise<sensor_msgs::Image>("feature_img",1000);
+    // 如果图像跟踪失败，发布重启标志
     pub_restart = n.advertise<std_msgs::Bool>("restart",1000);
     /*
     if (SHOW_TRACK)

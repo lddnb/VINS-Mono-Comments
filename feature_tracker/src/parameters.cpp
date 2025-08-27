@@ -34,6 +34,11 @@ T readParam(ros::NodeHandle &n, std::string name)
     return ans;
 }
 
+/**
+ * @brief 读取参数，使用opencv格式读取
+ * 
+ * @param n 
+ */
 void readParameters(ros::NodeHandle &n)
 {
     std::string config_file;

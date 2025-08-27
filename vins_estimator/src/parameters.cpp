@@ -39,6 +39,11 @@ T readParam(ros::NodeHandle &n, std::string name)
     return ans;
 }
 
+/**
+ * @brief 从配置文件中读取参数
+ * 
+ * @param n 
+ */
 void readParameters(ros::NodeHandle &n)
 {
     std::string config_file;
@@ -77,6 +82,7 @@ void readParameters(ros::NodeHandle &n)
     ROS_INFO("ROW: %f COL: %f ", ROW, COL);
 
     ESTIMATE_EXTRINSIC = fsSettings["estimate_extrinsic"];
+    // 没有先验的情况下，同时估计旋转和平移的外参
     if (ESTIMATE_EXTRINSIC == 2)
     {
         ROS_WARN("have no prior about extrinsic param, calibrate extrinsic param");
@@ -87,11 +93,13 @@ void readParameters(ros::NodeHandle &n)
     }
     else 
     {
+        // 有先验的情况下，优化旋转和平移的外参
         if ( ESTIMATE_EXTRINSIC == 1)
         {
             ROS_WARN(" Optimize extrinsic param around initial guess!");
             EX_CALIB_RESULT_PATH = OUTPUT_PATH + "/extrinsic_parameter.csv";
         }
+        // 固定外参
         if (ESTIMATE_EXTRINSIC == 0)
             ROS_WARN(" fix extrinsic param ");
 
@@ -115,6 +123,7 @@ void readParameters(ros::NodeHandle &n)
     BIAS_ACC_THRESHOLD = 0.1;
     BIAS_GYR_THRESHOLD = 0.1;
 
+    // 如果相机和IMU没做时间同步，则需要估计时间偏移
     TD = fsSettings["td"];
     ESTIMATE_TD = fsSettings["estimate_td"];
     if (ESTIMATE_TD)
@@ -122,6 +131,7 @@ void readParameters(ros::NodeHandle &n)
     else
         ROS_INFO_STREAM("Synchronized sensors, fix time offset: " << TD);
 
+    // 如果是卷帘快门相机，则读取TR
     ROLLING_SHUTTER = fsSettings["rolling_shutter"];
     if (ROLLING_SHUTTER)
     {

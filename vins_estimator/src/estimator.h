@@ -85,6 +85,9 @@ class Estimator
     IntegrationBase *pre_integrations[(WINDOW_SIZE + 1)];
     Vector3d acc_0, gyr_0;
 
+    //! 这种方式定义的是一个二维数组，数组的行数是WINDOW_SIZE+1，列数是vector.size()
+    //! 比如 dt_buf[3] 是一个 vector<double> 类型的动态数组
+    //! 可以和 int dt_buf[WINDOW_SIZE+1] 类比着看就好理解了
     vector<double> dt_buf[(WINDOW_SIZE + 1)];
     vector<Vector3d> linear_acceleration_buf[(WINDOW_SIZE + 1)];
     vector<Vector3d> angular_velocity_buf[(WINDOW_SIZE + 1)];

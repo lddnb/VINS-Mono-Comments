@@ -33,6 +33,10 @@ FeatureTracker::FeatureTracker()
 {
 }
 
+/**
+ * @brief 对图像做mask操作
+ * 
+ */
 void FeatureTracker::setMask()
 {
     if(FISHEYE)
@@ -44,6 +48,7 @@ void FeatureTracker::setMask()
     // prefer to keep features that are tracked for long time
     vector<pair<int, pair<cv::Point2f, int>>> cnt_pts_id;
 
+    // 将特征点按跟踪次数排序
     for (unsigned int i = 0; i < forw_pts.size(); i++)
         cnt_pts_id.push_back(make_pair(track_cnt[i], make_pair(forw_pts[i], ids[i])));
 
@@ -68,6 +73,10 @@ void FeatureTracker::setMask()
     }
 }
 
+/**
+ * @brief 将n_pts中的特征点添加到当前帧的特征点中
+ * 
+ */
 void FeatureTracker::addPoints()
 {
     for (auto &p : n_pts)
@@ -78,12 +87,19 @@ void FeatureTracker::addPoints()
     }
 }
 
+/**
+ * @brief 特征点跟踪的主要处理函数
+ * 
+ * @param _img 处理图像
+ * @param _cur_time 图像时间戳
+ */
 void FeatureTracker::readImage(const cv::Mat &_img, double _cur_time)
 {
     cv::Mat img;
     TicToc t_r;
     cur_time = _cur_time;
 
+    // 均衡化处理
     if (EQUALIZE)
     {
         cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE(3.0, cv::Size(8, 8));
@@ -94,6 +110,7 @@ void FeatureTracker::readImage(const cv::Mat &_img, double _cur_time)
     else
         img = _img;
 
+    // cur <--> 前一帧，forw <--> 当前帧
     if (forw_img.empty())
     {
         prev_img = cur_img = forw_img = img;
@@ -110,8 +127,10 @@ void FeatureTracker::readImage(const cv::Mat &_img, double _cur_time)
         TicToc t_o;
         vector<uchar> status;
         vector<float> err;
+        // 直接调用opencv的光流跟踪函数
         cv::calcOpticalFlowPyrLK(cur_img, forw_img, cur_pts, forw_pts, status, err, cv::Size(21, 21), 3);
 
+        // 去掉图像边缘的特征点
         for (int i = 0; i < int(forw_pts.size()); i++)
             if (status[i] && !inBorder(forw_pts[i]))
                 status[i] = 0;
@@ -124,6 +143,7 @@ void FeatureTracker::readImage(const cv::Mat &_img, double _cur_time)
         ROS_DEBUG("temporal optical flow costs: %fms", t_o.toc());
     }
 
+    // 特征点被跟踪的次数加一
     for (auto &n : track_cnt)
         n++;
 
@@ -137,6 +157,8 @@ void FeatureTracker::readImage(const cv::Mat &_img, double _cur_time)
 
         ROS_DEBUG("detect feature begins");
         TicToc t_t;
+        // 当特征点数量小于最大数量时，调用opencv的特征点检测函数
+        // 第一次运行时，所有的特征点都是用opencv的特征点检测函数检测的
         int n_max_cnt = MAX_CNT - static_cast<int>(forw_pts.size());
         if (n_max_cnt > 0)
         {
@@ -166,6 +188,10 @@ void FeatureTracker::readImage(const cv::Mat &_img, double _cur_time)
     prev_time = cur_time;
 }
 
+/**
+ * @brief 用RANSAC的方式计算基础矩阵，用于剔除误匹配的特征点
+ * 
+ */
 void FeatureTracker::rejectWithF()
 {
     if (forw_pts.size() >= 8)
@@ -213,6 +239,11 @@ bool FeatureTracker::updateID(unsigned int i)
         return false;
 }
 
+/**
+ * @brief 从yaml配置文件创建相机模型
+ * 
+ * @param calib_file 
+ */
 void FeatureTracker::readIntrinsicParameter(const string &calib_file)
 {
     ROS_INFO("reading paramerter of camera %s", calib_file.c_str());
@@ -255,6 +286,10 @@ void FeatureTracker::showUndistortion(const string &name)
     cv::waitKey(0);
 }
 
+/**
+ * @brief 对特征点进行畸变矫正，计算速度
+ * 
+ */
 void FeatureTracker::undistortedPoints()
 {
     cur_un_pts.clear();
@@ -272,6 +307,7 @@ void FeatureTracker::undistortedPoints()
     // caculate points velocity
     if (!prev_un_pts_map.empty())
     {
+        // 计算特征点在前后两帧之间的速度，如果是新的特征点，则速度为0
         double dt = cur_time - prev_time;
         pts_velocity.clear();
         for (unsigned int i = 0; i < cur_un_pts.size(); i++)
