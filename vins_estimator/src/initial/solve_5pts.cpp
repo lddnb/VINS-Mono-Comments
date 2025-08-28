@@ -189,7 +189,15 @@ namespace cv {
     }
 }
 
-
+/**
+ * @brief 求解旋转换和平移，直接调用opencv的函数
+ * 
+ * @param corres 
+ * @param Rotation 
+ * @param Translation 
+ * @return true 
+ * @return false 
+ */
 bool MotionEstimator::solveRelativeRT(const vector<pair<Vector3d, Vector3d>> &corres, Matrix3d &Rotation, Vector3d &Translation)
 {
     if (corres.size() >= 15)

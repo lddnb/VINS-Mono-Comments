@@ -127,8 +127,9 @@ void img_callback(const sensor_msgs::ImageConstPtr &img_msg)
    if (PUB_THIS_FRAME)
    {
         // 发布特征点
-        // id、xyz、uv、velocity，其中uv是没去畸变的
-        // xyz是归一化平面上的坐标，去畸变的，z为1，uv是原始图像上的像素坐标，未去畸变的
+        // id、xyz、uv、velocity
+        // xyz是归一化平面上的坐标，去畸变的，z为1
+        // uv是原始图像上的像素坐标，未去畸变的
         // velocity为当前帧相对前一帧特征点沿 x,y 方向的像素移动速度
         pub_count++;
         sensor_msgs::PointCloudPtr feature_points(new sensor_msgs::PointCloud);

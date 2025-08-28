@@ -2,6 +2,15 @@
 
 GlobalSFM::GlobalSFM(){}
 
+/**
+ * @brief 三角化两个像素点得到三维点
+ * 
+ * @param Pose0 
+ * @param Pose1 
+ * @param point0 
+ * @param point1 
+ * @param point_3d 
+ */
 void GlobalSFM::triangulatePoint(Eigen::Matrix<double, 3, 4> &Pose0, Eigen::Matrix<double, 3, 4> &Pose1,
 						Vector2d &point0, Vector2d &point1, Vector3d &point_3d)
 {
@@ -10,6 +19,7 @@ void GlobalSFM::triangulatePoint(Eigen::Matrix<double, 3, 4> &Pose0, Eigen::Matr
 	design_matrix.row(1) = point0[1] * Pose0.row(2) - Pose0.row(1);
 	design_matrix.row(2) = point1[0] * Pose1.row(2) - Pose1.row(0);
 	design_matrix.row(3) = point1[1] * Pose1.row(2) - Pose1.row(1);
+	// 也是用SVD分解求解Ax=0的最小二乘问题
 	Vector4d triangulated_point;
 	triangulated_point =
 		      design_matrix.jacobiSvd(Eigen::ComputeFullV).matrixV().rightCols<1>();
@@ -18,10 +28,20 @@ void GlobalSFM::triangulatePoint(Eigen::Matrix<double, 3, 4> &Pose0, Eigen::Matr
 	point_3d(2) = triangulated_point(2) / triangulated_point(3);
 }
 
-
+/**
+ * @brief pnp求解相机位姿
+ * 
+ * @param R_initial 
+ * @param P_initial 
+ * @param i 
+ * @param sfm_f 
+ * @return true 
+ * @return false 
+ */
 bool GlobalSFM::solveFrameByPnP(Matrix3d &R_initial, Vector3d &P_initial, int i,
 								vector<SFMFeature> &sfm_f)
 {
+	// 把已经得到三维点的特征在第i帧图像上的所有观测值都提取出来
 	vector<cv::Point2f> pts_2_vector;
 	vector<cv::Point3f> pts_3_vector;
 	for (int j = 0; j < feature_num; j++)
@@ -42,12 +62,14 @@ bool GlobalSFM::solveFrameByPnP(Matrix3d &R_initial, Vector3d &P_initial, int i,
 			}
 		}
 	}
+	// 匹配对数过少
 	if (int(pts_2_vector.size()) < 15)
 	{
 		printf("unstable features tracking, please slowly move you device!\n");
 		if (int(pts_2_vector.size()) < 10)
 			return false;
 	}
+	// 直接调用opencv的pnp求解函数
 	cv::Mat r, rvec, t, D, tmp_r;
 	cv::eigen2cv(R_initial, tmp_r);
 	cv::Rodrigues(tmp_r, rvec);
@@ -71,6 +93,15 @@ bool GlobalSFM::solveFrameByPnP(Matrix3d &R_initial, Vector3d &P_initial, int i,
 
 }
 
+/**
+ * @brief 三角化两个帧中的特征点
+ * 
+ * @param frame0 
+ * @param Pose0 
+ * @param frame1 
+ * @param Pose1 
+ * @param sfm_f 
+ */
 void GlobalSFM::triangulateTwoFrames(int frame0, Eigen::Matrix<double, 3, 4> &Pose0, 
 									 int frame1, Eigen::Matrix<double, 3, 4> &Pose1,
 									 vector<SFMFeature> &sfm_f)
@@ -78,6 +109,7 @@ void GlobalSFM::triangulateTwoFrames(int frame0, Eigen::Matrix<double, 3, 4> &Po
 	assert(frame0 != frame1);
 	for (int j = 0; j < feature_num; j++)
 	{
+		// 如果这个特征点已经被三角化过了，则跳过
 		if (sfm_f[j].state == true)
 			continue;
 		bool has_0 = false, has_1 = false;
@@ -96,6 +128,7 @@ void GlobalSFM::triangulateTwoFrames(int frame0, Eigen::Matrix<double, 3, 4> &Po
 				has_1 = true;
 			}
 		}
+		// 要求被特定的两帧观测到
 		if (has_0 && has_1)
 		{
 			Vector3d point_3d;
@@ -109,6 +142,20 @@ void GlobalSFM::triangulateTwoFrames(int frame0, Eigen::Matrix<double, 3, 4> &Po
 	}
 }
 
+/**
+ * @brief 构建SFM，计算滑窗中的每一帧位姿并做BA优化，同时三角化特征点
+ * 
+ * @param frame_num 
+ * @param q 
+ * @param T 
+ * @param l 
+ * @param relative_R 
+ * @param relative_T 
+ * @param sfm_f 
+ * @param sfm_tracked_points 
+ * @return true 
+ * @return false 
+ */
 // 	 q w_R_cam t w_R_cam
 //  c_rotation cam_R_w 
 //  c_translation cam_R_w
@@ -122,16 +169,19 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
 	//cout << "set 0 and " << l << " as known " << endl;
 	// have relative_r relative_t
 	// intial two view
+	// 取第l帧为参考帧，其位姿设为单位阵
 	q[l].w() = 1;
 	q[l].x() = 0;
 	q[l].y() = 0;
 	q[l].z() = 0;
 	T[l].setZero();
+	// 当前帧就是之前计算过的相对位姿
 	q[frame_num - 1] = q[l] * Quaterniond(relative_R);
 	T[frame_num - 1] = relative_T;
 	//cout << "init q_l " << q[l].w() << " " << q[l].vec().transpose() << endl;
 	//cout << "init t_l " << T[l].transpose() << endl;
 
+	// 上面的位姿是T_wc，下面转换成T_cw
 	//rotate to cam frame
 	Matrix3d c_Rotation[frame_num];
 	Vector3d c_Translation[frame_num];
@@ -158,6 +208,7 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
 	for (int i = l; i < frame_num - 1 ; i++)
 	{
 		// solve pnp
+		// 有三维点后，可以用pnp求解相机位姿
 		if (i > l)
 		{
 			Matrix3d R_initial = c_Rotation[i - 1];
@@ -171,14 +222,17 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
 			Pose[i].block<3, 1>(0, 3) = c_Translation[i];
 		}
 
+		// 先三角化 l 帧和当前帧，再pnp求解新位姿，再和当前帧做三角化
 		// triangulate point based on the solve pnp result
 		triangulateTwoFrames(i, Pose[i], frame_num - 1, Pose[frame_num - 1], sfm_f);
 	}
 	//3: triangulate l-----l+1 l+2 ... frame_num -2
+	// 至此已经得到了所有 l+i 帧的位姿，依次对第 l 帧与第 l+i 帧之间做三角化
 	for (int i = l + 1; i < frame_num - 1; i++)
 		triangulateTwoFrames(l, Pose[l], i, Pose[i], sfm_f);
 	//4: solve pnp l-1; triangulate l-1 ----- l
 	//             l-2              l-2 ----- l
+	// 对于 l-i 帧依次用pnp求解位姿，再与 l 帧做三角化
 	for (int i = l - 1; i >= 0; i--)
 	{
 		//solve pnp
@@ -194,7 +248,9 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
 		//triangulate
 		triangulateTwoFrames(i, Pose[i], l, Pose[l], sfm_f);
 	}
+	// 至此，所有帧的位姿都得到了
 	//5: triangulate all other points
+	// 三角化还没得到三维点的特征点，取该特征点被观测到的头帧和尾帧做三角化
 	for (int j = 0; j < feature_num; j++)
 	{
 		if (sfm_f[j].state == true)
@@ -215,6 +271,7 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
 			//cout << "trangulated : " << frame_0 << " " << frame_1 << "  3d point : "  << j << "  " << point_3d.transpose() << endl;
 		}		
 	}
+	// 至此所有位姿和路标点都得到了
 
 /*
 	for (int i = 0; i < frame_num; i++)
@@ -230,9 +287,11 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
 	}
 */
 	//full BA
+	// 构建 BA 问题，这里没有优化路标点，只优化相机位姿
 	ceres::Problem problem;
 	ceres::LocalParameterization* local_parameterization = new ceres::QuaternionParameterization();
 	//cout << " begin full BA " << endl;
+	// 添加位姿优化参数
 	for (int i = 0; i < frame_num; i++)
 	{
 		//double array for ceres
@@ -245,6 +304,7 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
 		c_rotation[i][3] = c_Quat[i].z();
 		problem.AddParameterBlock(c_rotation[i], 4, local_parameterization);
 		problem.AddParameterBlock(c_translation[i], 3);
+		// 固定参考帧
 		if (i == l)
 		{
 			problem.SetParameterBlockConstant(c_rotation[i]);
@@ -255,6 +315,7 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
 		}
 	}
 
+	// 添加残差项，为每个路标点构建重投影误差
 	for (int i = 0; i < feature_num; i++)
 	{
 		if (sfm_f[i].state != true)
@@ -287,6 +348,7 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
 		//cout << "vision only BA not converge " << endl;
 		return false;
 	}
+	// 导出结果，并转成 T_wc 形式
 	for (int i = 0; i < frame_num; i++)
 	{
 		q[i].w() = c_rotation[i][0]; 
@@ -302,6 +364,7 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
 		T[i] = -1 * (q[i] * Vector3d(c_translation[i][0], c_translation[i][1], c_translation[i][2]));
 		//cout << "final  t" << " i " << i <<"  " << T[i](0) <<"  "<< T[i](1) <<"  "<< T[i](2) << endl;
 	}
+	// 导出路标点
 	for (int i = 0; i < (int)sfm_f.size(); i++)
 	{
 		if(sfm_f[i].state)

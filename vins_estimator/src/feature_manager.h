@@ -15,6 +15,10 @@ using namespace Eigen;
 
 #include "parameters.h"
 
+/**
+ * @brief 单个特征点在单帧图像中的观测
+ * 
+ */
 class FeaturePerFrame
 {
   public:
@@ -41,12 +45,16 @@ class FeaturePerFrame
     double dep_gradient;
 };
 
+/**
+ * @brief 单个特征点在滑窗连续图像帧中的观测
+ * 
+ */
 class FeaturePerId
 {
   public:
-    const int feature_id;
-    int start_frame;
-    vector<FeaturePerFrame> feature_per_frame;
+    const int feature_id;                       //特征点ID
+    int start_frame;                            //第一次观测到的滑窗序号
+    vector<FeaturePerFrame> feature_per_frame;  //特征点在连续帧中的观测
 
     int used_num;
     bool is_outlier;
@@ -90,7 +98,7 @@ class FeatureManager
     void removeBack();
     void removeFront(int frame_count);
     void removeOutlier();
-    list<FeaturePerId> feature;
+    list<FeaturePerId> feature;   // 滑窗中的所有特征点
     int last_track_num;
 
   private:

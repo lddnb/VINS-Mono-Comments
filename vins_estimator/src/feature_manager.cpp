@@ -41,7 +41,15 @@ int FeatureManager::getFeatureCount()
     return cnt;
 }
 
-
+/**
+ * @brief 判断次新帧是否为关键帧（1）当前帧跟踪点少（2）次新帧与次次新帧的视差是否足够大，边缘化最旧帧，否则舍弃次新帧
+ * 
+ * @param frame_count 
+ * @param image 
+ * @param td 
+ * @return true 
+ * @return false 
+ */
 bool FeatureManager::addFeatureCheckParallax(int frame_count, const map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> &image, double td)
 {
     ROS_DEBUG("input feature: %d", (int)image.size());
@@ -49,16 +57,19 @@ bool FeatureManager::addFeatureCheckParallax(int frame_count, const map<int, vec
     double parallax_sum = 0;
     int parallax_num = 0;
     last_track_num = 0;
+    // 遍历得到当前帧的所有特征点
     for (auto &id_pts : image)
     {
         FeaturePerFrame f_per_fra(id_pts.second[0].second, td);
 
+        // 从滑窗中寻找该特征点
         int feature_id = id_pts.first;
         auto it = find_if(feature.begin(), feature.end(), [feature_id](const FeaturePerId &it)
                           {
             return it.feature_id == feature_id;
                           });
 
+        // 如果没有找到该特征点，则创建新的特征点
         if (it == feature.end())
         {
             feature.push_back(FeaturePerId(feature_id, frame_count));
@@ -71,9 +82,11 @@ bool FeatureManager::addFeatureCheckParallax(int frame_count, const map<int, vec
         }
     }
 
+    // 滑窗前两帧都设置为KF，追踪过少也认为是KF
     if (frame_count < 2 || last_track_num < 20)
         return true;
 
+    // 判断次新帧与次次新帧的视差是否足够大
     for (auto &it_per_id : feature)
     {
         if (it_per_id.start_frame <= frame_count - 2 &&
@@ -117,11 +130,19 @@ void FeatureManager::debugShow()
     }
 }
 
+/**
+ * @brief 找出特定两帧之间对应的特征点
+ * 
+ * @param frame_count_l 
+ * @param frame_count_r 
+ * @return vector<pair<Vector3d, Vector3d>> 
+ */
 vector<pair<Vector3d, Vector3d>> FeatureManager::getCorresponding(int frame_count_l, int frame_count_r)
 {
     vector<pair<Vector3d, Vector3d>> corres;
     for (auto &it : feature)
     {
+        // 要求特征点的连续帧覆盖所要求的范围
         if (it.start_frame <= frame_count_l && it.endFrame() >= frame_count_r)
         {
             Vector3d a = Vector3d::Zero(), b = Vector3d::Zero();
@@ -132,6 +153,7 @@ vector<pair<Vector3d, Vector3d>> FeatureManager::getCorresponding(int frame_coun
 
             b = it.feature_per_frame[idx_r].point;
             
+            // 缓存特征点在归一化平面下的坐标
             corres.push_back(make_pair(a, b));
         }
     }
@@ -352,6 +374,13 @@ void FeatureManager::removeFront(int frame_count)
     }
 }
 
+/**
+ * @brief 计算次新帧与次次新帧的视差，也就是同一个特征点在两个归一化平面上的像素距离
+ * 
+ * @param it_per_id 
+ * @param frame_count 
+ * @return double 
+ */
 double FeatureManager::compensatedParallax2(const FeaturePerId &it_per_id, int frame_count)
 {
     //check the second last frame is keyframe or not

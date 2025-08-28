@@ -139,8 +139,10 @@ void Estimator::processImage(const map<int, vector<pair<int, Eigen::Matrix<doubl
     ROS_DEBUG("new image coming ------------------------------------------");
     ROS_DEBUG("Adding feature points %lu", image.size());
     if (f_manager.addFeatureCheckParallax(frame_count, image, td))
+        // 边缘化最旧帧
         marginalization_flag = MARGIN_OLD;
     else
+        // 舍弃次新帧
         marginalization_flag = MARGIN_SECOND_NEW;
 
     ROS_DEBUG("this frame is--------------------%s", marginalization_flag ? "reject" : "accept");
@@ -154,26 +156,33 @@ void Estimator::processImage(const map<int, vector<pair<int, Eigen::Matrix<doubl
     all_image_frame.insert(make_pair(header.stamp.toSec(), imageframe));
     tmp_pre_integration = new IntegrationBase{acc_0, gyr_0, Bas[frame_count], Bgs[frame_count]};
 
+    // 无先验标定外参
     if(ESTIMATE_EXTRINSIC == 2)
     {
+        // 需要足够的运动激励
         ROS_INFO("calibrating extrinsic param, rotation movement is needed");
         if (frame_count != 0)
         {
+            // 寻找前后两帧关联的特征点
             vector<pair<Vector3d, Vector3d>> corres = f_manager.getCorresponding(frame_count - 1, frame_count);
             Matrix3d calib_ric;
+            // 标定旋转外参
             if (initial_ex_rotation.CalibrationExRotation(corres, pre_integrations[frame_count]->delta_q, calib_ric))
             {
                 ROS_WARN("initial extrinsic rotation calib success");
                 ROS_WARN_STREAM("initial extrinsic rotation: " << endl << calib_ric);
                 ric[0] = calib_ric;
                 RIC[0] = calib_ric;
+                // 外参估计成功后作为先验值，后续参与优化
                 ESTIMATE_EXTRINSIC = 1;
             }
         }
     }
 
+    // 初始化
     if (solver_flag == INITIAL)
     {
+        // 累积10帧之后才开始初始化
         if (frame_count == WINDOW_SIZE)
         {
             bool result = false;
@@ -232,12 +241,21 @@ void Estimator::processImage(const map<int, vector<pair<int, Eigen::Matrix<doubl
         last_P0 = Ps[0];
     }
 }
+
+/**
+ * @brief 初始化的主要函数
+ * 
+ * @return true 
+ * @return false 
+ */
 bool Estimator::initialStructure()
 {
     TicToc t_sfm;
     //check imu observibility
+    // 检查IMU是否充分运动
     {
         map<double, ImageFrame>::iterator frame_it;
+        // 累加所有图像帧预积分的角加速度
         Vector3d sum_g;
         for (frame_it = all_image_frame.begin(), frame_it++; frame_it != all_image_frame.end(); frame_it++)
         {
@@ -245,6 +263,7 @@ bool Estimator::initialStructure()
             Vector3d tmp_g = frame_it->second.pre_integration->delta_v / dt;
             sum_g += tmp_g;
         }
+        // 计算角加速度的均值和协方差
         Vector3d aver_g;
         aver_g = sum_g * 1.0 / ((int)all_image_frame.size() - 1);
         double var = 0;
@@ -257,6 +276,7 @@ bool Estimator::initialStructure()
         }
         var = sqrt(var / ((int)all_image_frame.size() - 1));
         //ROS_WARN("IMU variation %f!", var);
+        // 协方差越大，角加速度变化越大，IMU运动越充分
         if(var < 0.25)
         {
             ROS_INFO("IMU excitation not enouth!");
@@ -264,9 +284,12 @@ bool Estimator::initialStructure()
         }
     }
     // global sfm
+    // sfm 流程
     Quaterniond Q[frame_count + 1];
     Vector3d T[frame_count + 1];
     map<int, Vector3d> sfm_tracked_points;
+    // 往sfm_f中添加所有不同图像中的特征点
+    // 一个 SFMFeature 对应一个特征点，在连续帧中的观测
     vector<SFMFeature> sfm_f;
     for (auto &it_per_id : f_manager.feature)
     {
@@ -284,12 +307,14 @@ bool Estimator::initialStructure()
     } 
     Matrix3d relative_R;
     Vector3d relative_T;
+    // 从滑窗中选择一个和当前帧视差足够大的帧作为参考帧
     int l;
     if (!relativePose(relative_R, relative_T, l))
     {
         ROS_INFO("Not enough features or parallax; Move device around");
         return false;
     }
+    // 构建SFM，求解位姿和路标点
     GlobalSFM sfm;
     if(!sfm.construct(frame_count + 1, Q, T, l,
               relative_R, relative_T,
@@ -301,6 +326,7 @@ bool Estimator::initialStructure()
     }
 
     //solve pnp for all frame
+    // 用pnp求解所有帧的位姿
     map<double, ImageFrame>::iterator frame_it;
     map<int, Vector3d>::iterator it;
     frame_it = all_image_frame.begin( );
@@ -308,6 +334,7 @@ bool Estimator::initialStructure()
     {
         // provide initial guess
         cv::Mat r, rvec, t, D, tmp_r;
+        // 如果是滑窗中的关键帧，直接用上面计算的结果
         if((frame_it->first) == Headers[i].stamp.toSec())
         {
             frame_it->second.is_key_frame = true;
@@ -320,12 +347,14 @@ bool Estimator::initialStructure()
         {
             i++;
         }
+        // 取一个时间戳相近的帧的位姿作为初始值
         Matrix3d R_inital = (Q[i].inverse()).toRotationMatrix();
         Vector3d P_inital = - R_inital * T[i];
         cv::eigen2cv(R_inital, tmp_r);
         cv::Rodrigues(tmp_r, rvec);
         cv::eigen2cv(P_inital, t);
 
+        // 对于图像中的每个特征点，到已经得到三维点的特征点中去找
         frame_it->second.is_key_frame = false;
         vector<cv::Point3f> pts_3_vector;
         vector<cv::Point2f> pts_2_vector;
@@ -368,6 +397,7 @@ bool Estimator::initialStructure()
         frame_it->second.R = R_pnp * RIC[0].transpose();
         frame_it->second.T = T_pnp;
     }
+    // 做视觉和IMU的对齐
     if (visualInitialAlign())
         return true;
     else
@@ -378,6 +408,12 @@ bool Estimator::initialStructure()
 
 }
 
+/**
+ * @brief 视觉和IMU对齐恢复尺度
+ * 
+ * @return true 
+ * @return false 
+ */
 bool Estimator::visualInitialAlign()
 {
     TicToc t_g;
@@ -456,6 +492,15 @@ bool Estimator::visualInitialAlign()
     return true;
 }
 
+/**
+ * @brief 在滑窗中找到一个与最新帧有足够视差的帧，并计算两帧间的相对位姿
+ * 
+ * @param relative_R 
+ * @param relative_T 
+ * @param l 
+ * @return true 
+ * @return false 
+ */
 bool Estimator::relativePose(Matrix3d &relative_R, Vector3d &relative_T, int &l)
 {
     // find previous frame which contians enough correspondance and parallex with newest frame
@@ -476,6 +521,7 @@ bool Estimator::relativePose(Matrix3d &relative_R, Vector3d &relative_T, int &l)
 
             }
             average_parallax = 1.0 * sum_parallax / int(corres.size());
+            // 要求平均视差足够大，且可以计算出相对位姿
             if(average_parallax * 460 > 30 && m_estimator.solveRelativeRT(corres, relative_R, relative_T))
             {
                 l = i;

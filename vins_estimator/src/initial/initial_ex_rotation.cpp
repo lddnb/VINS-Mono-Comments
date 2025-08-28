@@ -13,6 +13,7 @@ bool InitialEXRotation::CalibrationExRotation(vector<pair<Vector3d, Vector3d>> c
     frame_count++;
     Rc.push_back(solveRelativeR(corres));
     Rimu.push_back(delta_q_imu.toRotationMatrix());
+    // 相对旋转变换从imu系转到相机系下
     Rc_g.push_back(ric.inverse() * delta_q_imu * ric);
 
     Eigen::MatrixXd A(frame_count * 4, 4);
@@ -23,10 +24,12 @@ bool InitialEXRotation::CalibrationExRotation(vector<pair<Vector3d, Vector3d>> c
         Quaterniond r1(Rc[i]);
         Quaterniond r2(Rc_g[i]);
 
+        // 计算角度差
         double angular_distance = 180 / M_PI * r1.angularDistance(r2);
         ROS_DEBUG(
             "%d %f", i, angular_distance);
 
+        // 鲁棒核函数，角度差越大，权重越小
         double huber = angular_distance > 5.0 ? 5.0 / angular_distance : 1.0;
         ++sum_ok;
         Matrix4d L, R;
@@ -49,14 +52,18 @@ bool InitialEXRotation::CalibrationExRotation(vector<pair<Vector3d, Vector3d>> c
         A.block<4, 4>((i - 1) * 4, 0) = huber * (L - R);
     }
 
+    // svd求解 Ax = 0，最小奇异值对应的右奇异向量
     JacobiSVD<MatrixXd> svd(A, ComputeFullU | ComputeFullV);
     Matrix<double, 4, 1> x = svd.matrixV().col(3);
     Quaterniond estimated_R(x);
+    // 和论文中的表达式不一样，需要取反
     ric = estimated_R.toRotationMatrix().inverse();
     //cout << svd.singularValues().transpose() << endl;
     //cout << ric << endl;
     Vector3d ric_cov;
     ric_cov = svd.singularValues().tail<3>();
+    // 要求迭代计算WINDOW_SIZE次
+    //! 同时要求第二小的奇异值大于一定阈值，以确保最小奇异值对应的结果的可靠性
     if (frame_count >= WINDOW_SIZE && ric_cov(1) > 0.25)
     {
         calib_ric_result = ric;
@@ -66,6 +73,12 @@ bool InitialEXRotation::CalibrationExRotation(vector<pair<Vector3d, Vector3d>> c
         return false;
 }
 
+/**
+ * @brief 求解相对旋转
+ * 
+ * @param corres 
+ * @return Matrix3d 
+ */
 Matrix3d InitialEXRotation::solveRelativeR(const vector<pair<Vector3d, Vector3d>> &corres)
 {
     if (corres.size() >= 9)
@@ -76,19 +89,23 @@ Matrix3d InitialEXRotation::solveRelativeR(const vector<pair<Vector3d, Vector3d>
             ll.push_back(cv::Point2f(corres[i].first(0), corres[i].first(1)));
             rr.push_back(cv::Point2f(corres[i].second(0), corres[i].second(1)));
         }
+        // 计算本质矩阵
         cv::Mat E = cv::findFundamentalMat(ll, rr);
         cv::Mat_<double> R1, R2, t1, t2;
         decomposeE(E, R1, R2, t1, t2);
 
+        // 得到的旋转矩阵行列式为 -1，需要取反，重新分解计算
         if (determinant(R1) + 1.0 < 1e-09)
         {
             E = -E;
             decomposeE(E, R1, R2, t1, t2);
         }
+        // 做三角化，计算正确的比例
         double ratio1 = max(testTriangulation(ll, rr, R1, t1), testTriangulation(ll, rr, R1, t2));
         double ratio2 = max(testTriangulation(ll, rr, R2, t1), testTriangulation(ll, rr, R2, t2));
         cv::Mat_<double> ans_R_cv = ratio1 > ratio2 ? R1 : R2;
 
+        // 只返回旋转结果
         Matrix3d ans_R_eigen;
         for (int i = 0; i < 3; i++)
             for (int j = 0; j < 3; j++)
@@ -98,6 +115,15 @@ Matrix3d InitialEXRotation::solveRelativeR(const vector<pair<Vector3d, Vector3d>
     return Matrix3d::Identity();
 }
 
+/**
+ * @brief 对当前计算的旋转和平移结果做三角化，计算正确的比例
+ * 
+ * @param l 
+ * @param r 
+ * @param R 
+ * @param t 
+ * @return double 
+ */
 double InitialEXRotation::testTriangulation(const vector<cv::Point2f> &l,
                                           const vector<cv::Point2f> &r,
                                           cv::Mat_<double> R, cv::Mat_<double> t)
@@ -115,8 +141,11 @@ double InitialEXRotation::testTriangulation(const vector<cv::Point2f> &l,
     {
         double normal_factor = pointcloud.col(i).at<float>(3);
 
+        // 都转到相机坐标系下
         cv::Mat_<double> p_3d_l = cv::Mat(P) * (pointcloud.col(i) / normal_factor);
         cv::Mat_<double> p_3d_r = cv::Mat(P1) * (pointcloud.col(i) / normal_factor);
+
+        // 深度大于0，说明旋转和平移正确，有效数加一
         if (p_3d_l(2) > 0 && p_3d_r(2) > 0)
             front_count++;
     }
@@ -124,6 +153,15 @@ double InitialEXRotation::testTriangulation(const vector<cv::Point2f> &l,
     return 1.0 * front_count / pointcloud.cols;
 }
 
+/**
+ * @brief 分解本质矩阵，得到两个旋转矩阵和平移向量
+ * 
+ * @param E 
+ * @param R1 
+ * @param R2 
+ * @param t1 
+ * @param t2 
+ */
 void InitialEXRotation::decomposeE(cv::Mat E,
                                  cv::Mat_<double> &R1, cv::Mat_<double> &R2,
                                  cv::Mat_<double> &t1, cv::Mat_<double> &t2)
