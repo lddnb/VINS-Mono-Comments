@@ -191,6 +191,11 @@ void FeatureManager::removeFailures()
     }
 }
 
+/**
+ * @brief 重置所有特征点的深度估计值
+ * 
+ * @param x 
+ */
 void FeatureManager::clearDepth(const VectorXd &x)
 {
     int feature_index = -1;
@@ -203,6 +208,11 @@ void FeatureManager::clearDepth(const VectorXd &x)
     }
 }
 
+/**
+ * @brief 获取所有特征点深度的逆向量
+ * 
+ * @return VectorXd 
+ */
 VectorXd FeatureManager::getDepthVector()
 {
     VectorXd dep_vec(getFeatureCount());
@@ -221,14 +231,23 @@ VectorXd FeatureManager::getDepthVector()
     return dep_vec;
 }
 
+/**
+ * @brief 根据输入位姿三角化特征点
+ * 
+ * @param Ps 
+ * @param tic 
+ * @param ric 
+ */
 void FeatureManager::triangulate(Vector3d Ps[], Vector3d tic[], Matrix3d ric[])
 {
     for (auto &it_per_id : feature)
     {
         it_per_id.used_num = it_per_id.feature_per_frame.size();
+        // 特征点被连续观测次数过少，只被观测过一次，或者特征点太新，最后几帧才观测到的，跳过
         if (!(it_per_id.used_num >= 2 && it_per_id.start_frame < WINDOW_SIZE - 2))
             continue;
 
+        // 已经三角化过的特征点，跳过
         if (it_per_id.estimated_depth > 0)
             continue;
         int imu_i = it_per_id.start_frame, imu_j = imu_i - 1;
@@ -238,6 +257,7 @@ void FeatureManager::triangulate(Vector3d Ps[], Vector3d tic[], Matrix3d ric[])
         int svd_idx = 0;
 
         Eigen::Matrix<double, 3, 4> P0;
+        // R_w_ci, t_w_ci，第一次观测到特征点的图像帧位姿
         Eigen::Vector3d t0 = Ps[imu_i] + Rs[imu_i] * tic[0];
         Eigen::Matrix3d R0 = Rs[imu_i] * ric[0];
         P0.leftCols<3>() = Eigen::Matrix3d::Identity();

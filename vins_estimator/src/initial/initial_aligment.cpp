@@ -1,5 +1,11 @@
 #include "initial_alignment.h"
 
+/**
+ * @brief bg校正
+ * 
+ * @param all_image_frame 
+ * @param Bgs 
+ */
 void solveGyroscopeBias(map<double, ImageFrame> &all_image_frame, Vector3d* Bgs)
 {
     Matrix3d A;
@@ -17,18 +23,21 @@ void solveGyroscopeBias(map<double, ImageFrame> &all_image_frame, Vector3d* Bgs)
         VectorXd tmp_b(3);
         tmp_b.setZero();
         Eigen::Quaterniond q_ij(frame_i->second.R.transpose() * frame_j->second.R);
-        tmp_A = frame_j->second.pre_integration->jacobian.template block<3, 3>(O_R, O_BG);
-        tmp_b = 2 * (frame_j->second.pre_integration->delta_q.inverse() * q_ij).vec();
+        tmp_A = frame_j->second.pre_integration->jacobian.template block<3, 3>(O_R, O_BG); // 雅克比
+        tmp_b = 2 * (frame_j->second.pre_integration->delta_q.inverse() * q_ij).vec(); // 残差
         A += tmp_A.transpose() * tmp_A;
         b += tmp_A.transpose() * tmp_b;
 
     }
+    // 适定方程直接LDLT分解求解 Ax = b
     delta_bg = A.ldlt().solve(b);
     ROS_WARN_STREAM("gyroscope bias initial calibration " << delta_bg.transpose());
 
+    // 校正滑窗中的bg
     for (int i = 0; i <= WINDOW_SIZE; i++)
         Bgs[i] += delta_bg;
 
+    // 用更新的bg重新计算所有已知帧的预积分
     for (frame_i = all_image_frame.begin(); next(frame_i) != all_image_frame.end( ); frame_i++)
     {
         frame_j = next(frame_i);
@@ -52,6 +61,13 @@ MatrixXd TangentBasis(Vector3d &g0)
     return bc;
 }
 
+/**
+ * @brief 修正的重力加速度的模长和方向
+ * 
+ * @param all_image_frame 
+ * @param g 
+ * @param x 
+ */
 void RefineGravity(map<double, ImageFrame> &all_image_frame, Vector3d &g, VectorXd &x)
 {
     Vector3d g0 = g.normalized() * G.norm();
@@ -122,9 +138,19 @@ void RefineGravity(map<double, ImageFrame> &all_image_frame, Vector3d &g, Vector
     g = g0;
 }
 
+/**
+ * @brief 计算速度，重力加速度和尺度
+ * 
+ * @param all_image_frame 
+ * @param g 
+ * @param x 
+ * @return true 
+ * @return false 
+ */
 bool LinearAlignment(map<double, ImageFrame> &all_image_frame, Vector3d &g, VectorXd &x)
 {
     int all_frame_count = all_image_frame.size();
+    // n个三维速度量 + 1个三维重力加速度量 + 1个一维尺度量
     int n_state = all_frame_count * 3 + 3 + 1;
 
     MatrixXd A{n_state, n_state};
@@ -157,6 +183,7 @@ bool LinearAlignment(map<double, ImageFrame> &all_image_frame, Vector3d &g, Vect
         tmp_b.block<3, 1>(3, 0) = frame_j->second.pre_integration->delta_v;
         //cout << "delta_v   " << frame_j->second.pre_integration->delta_v.transpose() << endl;
 
+        // 权重，但是没用到
         Matrix<double, 6, 6> cov_inv = Matrix<double, 6, 6>::Zero();
         //cov.block<6, 6>(0, 0) = IMU_cov[i + 1];
         //MatrixXd cov_inv = cov.inverse();
@@ -177,15 +204,19 @@ bool LinearAlignment(map<double, ImageFrame> &all_image_frame, Vector3d &g, Vect
     A = A * 1000.0;
     b = b * 1000.0;
     x = A.ldlt().solve(b);
+    // 尺度
     double s = x(n_state - 1) / 100.0;
     ROS_DEBUG("estimated scale: %f", s);
+    // 重力加速度
     g = x.segment<3>(n_state - 4);
     ROS_DEBUG_STREAM(" result g     " << g.norm() << " " << g.transpose());
+    // 如果重力加速度与参考值差太大或者尺度为负则说明计算错误
     if(fabs(g.norm() - G.norm()) > 1.0 || s < 0)
     {
         return false;
     }
 
+    // 优化重力加速度
     RefineGravity(all_image_frame, g, x);
     s = (x.tail<1>())(0) / 100.0;
     (x.tail<1>())(0) = s;
@@ -196,10 +227,22 @@ bool LinearAlignment(map<double, ImageFrame> &all_image_frame, Vector3d &g, Vect
         return true;
 }
 
+/**
+ * @brief 视觉和IMU对齐
+ * 
+ * @param all_image_frame 
+ * @param Bgs 
+ * @param g 
+ * @param x 
+ * @return true 
+ * @return false 
+ */
 bool VisualIMUAlignment(map<double, ImageFrame> &all_image_frame, Vector3d* Bgs, Vector3d &g, VectorXd &x)
 {
+    // 校正bg
     solveGyroscopeBias(all_image_frame, Bgs);
 
+    // 计算速度，重力加速度和尺度
     if(LinearAlignment(all_image_frame, g, x))
         return true;
     else 

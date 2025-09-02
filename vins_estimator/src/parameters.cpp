@@ -82,7 +82,7 @@ void readParameters(ros::NodeHandle &n)
     ROS_INFO("ROW: %f COL: %f ", ROW, COL);
 
     ESTIMATE_EXTRINSIC = fsSettings["estimate_extrinsic"];
-    // 没有先验的情况下，同时估计旋转和平移的外参
+    // 没有先验的情况下，估计旋转外参，这里没估计平移外参
     if (ESTIMATE_EXTRINSIC == 2)
     {
         ROS_WARN("have no prior about extrinsic param, calibrate extrinsic param");

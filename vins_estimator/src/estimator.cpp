@@ -315,6 +315,7 @@ bool Estimator::initialStructure()
         return false;
     }
     // 构建SFM，求解位姿和路标点
+    //! 这里位姿结果是 Twc，即相对于参考帧的位姿，具体为 T_c0_ck
     GlobalSFM sfm;
     if(!sfm.construct(frame_count + 1, Q, T, l,
               relative_R, relative_T,
@@ -327,6 +328,8 @@ bool Estimator::initialStructure()
 
     //solve pnp for all frame
     // 用pnp求解所有帧的位姿
+    //! 这里的位姿旋转部分右乘了一个 R_CI，所以这里位姿的含义是
+    //! R_c0_bk，t_c0_ck
     map<double, ImageFrame>::iterator frame_it;
     map<int, Vector3d>::iterator it;
     frame_it = all_image_frame.begin( );
@@ -405,11 +408,11 @@ bool Estimator::initialStructure()
         ROS_INFO("misalign visual structure with IMU");
         return false;
     }
-
+    // 至此完成初始化
 }
 
 /**
- * @brief 视觉和IMU对齐恢复尺度
+ * @brief 视觉和IMU对齐
  * 
  * @return true 
  * @return false 
@@ -427,6 +430,7 @@ bool Estimator::visualInitialAlign()
     }
 
     // change state
+    //! R: R_c0_bk，P:t_c0_ck
     for (int i = 0; i <= frame_count; i++)
     {
         Matrix3d Ri = all_image_frame[Headers[i].stamp.toSec()].R;
@@ -436,12 +440,14 @@ bool Estimator::visualInitialAlign()
         all_image_frame[Headers[i].stamp.toSec()].is_key_frame = true;
     }
 
+    // 重置深度
     VectorXd dep = f_manager.getDepthVector();
     for (int i = 0; i < dep.size(); i++)
         dep[i] = -1;
     f_manager.clearDepth(dep);
 
     //triangulat on cam pose , no tic
+    // 设TIC为的零的情况下，三角化所有关键帧的特征点
     Vector3d TIC_TMP[NUM_OF_CAM];
     for(int i = 0; i < NUM_OF_CAM; i++)
         TIC_TMP[i].setZero();
@@ -449,23 +455,30 @@ bool Estimator::visualInitialAlign()
     f_manager.setRic(ric);
     f_manager.triangulate(Ps, &(TIC_TMP[0]), &(RIC[0]));
 
+    // 用校正后的 bg 重新计算预积分
     double s = (x.tail<1>())(0);
     for (int i = 0; i <= WINDOW_SIZE; i++)
     {
         pre_integrations[i]->repropagate(Vector3d::Zero(), Bgs[i]);
     }
+    // 下面开始把第一个关键帧的imu坐标系做为惯性世界坐标系，其它变量都转到世界坐标系下
+    // 平移转换，计算 t_w_bk 在 c0 系下的向量
     for (int i = frame_count; i >= 0; i--)
         Ps[i] = s * Ps[i] - Rs[i] * TIC[0] - (s * Ps[0] - Rs[0] * TIC[0]);
+
+    // 计算关键帧的速度
     int kv = -1;
     map<double, ImageFrame>::iterator frame_i;
     for (frame_i = all_image_frame.begin(); frame_i != all_image_frame.end(); frame_i++)
     {
+        // 速度在 c0 系下
         if(frame_i->second.is_key_frame)
         {
             kv++;
             Vs[kv] = frame_i->second.R * x.segment<3>(kv * 3);
         }
     }
+    // 对特征点的估计深度恢复尺度
     for (auto &it_per_id : f_manager.feature)
     {
         it_per_id.used_num = it_per_id.feature_per_frame.size();
@@ -474,11 +487,16 @@ bool Estimator::visualInitialAlign()
         it_per_id.estimated_depth *= s;
     }
 
+    // 得到 R_w_c0
     Matrix3d R0 = Utility::g2R(g);
+    // 计算转换后的yaw，对其补偿，令转换后yaw为0
     double yaw = Utility::R2ypr(R0 * Rs[0]).x();
     R0 = Utility::ypr2R(Eigen::Vector3d{-yaw, 0, 0}) * R0;
+    // 对齐重力
     g = R0 * g;
     //Matrix3d rot_diff = R0 * Rs[0].transpose();
+    // 这里的 P:t_w_bk在c0系下的向量，R:R_c0_bk，V:v_bk在c0系下的向量
+    // 左乘一个 R_w_c0 全部都转到世界系下
     Matrix3d rot_diff = R0;
     for (int i = 0; i <= frame_count; i++)
     {

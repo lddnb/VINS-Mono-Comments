@@ -1,5 +1,11 @@
 #include "utility.h"
 
+/**
+ * @brief 计算重力方向和[0,0,1]之间的旋转矩阵，同时将yaw置零
+ * 
+ * @param g 
+ * @return Eigen::Matrix3d 
+ */
 Eigen::Matrix3d Utility::g2R(const Eigen::Vector3d &g)
 {
     Eigen::Matrix3d R0;
