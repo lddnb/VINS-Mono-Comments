@@ -55,15 +55,16 @@ class MarginalizationInfo
     std::vector<double *> getParameterBlocks(std::unordered_map<long, double *> &addr_shift);
 
     std::vector<ResidualBlockInfo *> factors;
-    int m, n;
-    std::unordered_map<long, int> parameter_block_size; //global size
+    int m; // 所有将被marg掉变量的localsize之和
+    int n; // 所有与将被marg掉变量有约束关系的变量的localsize之和
+    std::unordered_map<long, int> parameter_block_size; // <参数块地址, 不累加的参数块的globalSize>
     int sum_block_size;
-    std::unordered_map<long, int> parameter_block_idx; //local size
-    std::unordered_map<long, double *> parameter_block_data;
+    std::unordered_map<long, int> parameter_block_idx; // <待marg的参数块地址, 累加的参数块的localSize>, marginalize后变成<参数块地址, 累加的参数块的localSize>
+    std::unordered_map<long, double *> parameter_block_data; // <参数块地址, 参数块地址数据>
 
-    std::vector<int> keep_block_size; //global size
-    std::vector<int> keep_block_idx;  //local size
-    std::vector<double *> keep_block_data;
+    std::vector<int> keep_block_size; // <保留下来的参数块地址，不累加的参数块的globalsize>
+    std::vector<int> keep_block_idx;  // <保留下来的参数块地址，累加的参数块的localSize>，但是还是从marg的参数块开始计数，所以用的时候要减去m
+    std::vector<double *> keep_block_data; // <保留下来的参数块地址，参数块地址数据>
 
     Eigen::MatrixXd linearized_jacobians;
     Eigen::VectorXd linearized_residuals;

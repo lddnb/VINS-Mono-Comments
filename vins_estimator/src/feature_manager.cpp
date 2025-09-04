@@ -232,7 +232,7 @@ VectorXd FeatureManager::getDepthVector()
 }
 
 /**
- * @brief 根据输入位姿三角化特征点
+ * @brief 根据输入位姿三角化特征点，得到start_frame下的深度
  * 
  * @param Ps 
  * @param tic 
@@ -266,9 +266,10 @@ void FeatureManager::triangulate(Vector3d Ps[], Vector3d tic[], Matrix3d ric[])
         for (auto &it_per_frame : it_per_id.feature_per_frame)
         {
             imu_j++;
-
+            // R_w_cj, t_w_cj
             Eigen::Vector3d t1 = Ps[imu_j] + Rs[imu_j] * tic[0];
             Eigen::Matrix3d R1 = Rs[imu_j] * ric[0];
+            // R_ci_cj, t_ci_cj
             Eigen::Vector3d t = R0.transpose() * (t1 - t0);
             Eigen::Matrix3d R = R0.transpose() * R1;
             Eigen::Matrix<double, 3, 4> P;
@@ -281,6 +282,7 @@ void FeatureManager::triangulate(Vector3d Ps[], Vector3d tic[], Matrix3d ric[])
             if (imu_i == imu_j)
                 continue;
         }
+        // 这里计算得到的深度是ci帧，即第一次观测到特征点的图像帧start_frame下的深度
         ROS_ASSERT(svd_idx == svd_A.rows());
         Eigen::Vector4d svd_V = Eigen::JacobiSVD<Eigen::MatrixXd>(svd_A, Eigen::ComputeThinV).matrixV().rightCols<1>();
         double svd_method = svd_V[2] / svd_V[3];
@@ -314,6 +316,14 @@ void FeatureManager::removeOutlier()
     }
 }
 
+/**
+ * @brief 最旧帧退出滑窗时，更新特征点的start_frame和深度
+ * 
+ * @param marg_R 
+ * @param marg_P 
+ * @param new_R 
+ * @param new_P 
+ */
 void FeatureManager::removeBackShiftDepth(Eigen::Matrix3d marg_R, Eigen::Vector3d marg_P, Eigen::Matrix3d new_R, Eigen::Vector3d new_P)
 {
     for (auto it = feature.begin(), it_next = feature.begin();
@@ -321,12 +331,14 @@ void FeatureManager::removeBackShiftDepth(Eigen::Matrix3d marg_R, Eigen::Vector3
     {
         it_next++;
 
+        // 重新计算start_frame
         if (it->start_frame != 0)
             it->start_frame--;
         else
         {
             Eigen::Vector3d uv_i = it->feature_per_frame[0].point;  
             it->feature_per_frame.erase(it->feature_per_frame.begin());
+            // 如果是孤立点，直接删除
             if (it->feature_per_frame.size() < 2)
             {
                 feature.erase(it);
@@ -334,6 +346,7 @@ void FeatureManager::removeBackShiftDepth(Eigen::Matrix3d marg_R, Eigen::Vector3
             }
             else
             {
+                // 否则重新计算这个路标点在新的第0帧下的深度
                 Eigen::Vector3d pts_i = uv_i * it->estimated_depth;
                 Eigen::Vector3d w_pts_i = marg_R * pts_i + marg_P;
                 Eigen::Vector3d pts_j = new_R.transpose() * (w_pts_i - new_P);
@@ -384,10 +397,12 @@ void FeatureManager::removeFront(int frame_count)
         }
         else
         {
+            // 连续帧中删除次新帧的观测
             int j = WINDOW_SIZE - 1 - it->start_frame;
             if (it->endFrame() < frame_count - 1)
                 continue;
             it->feature_per_frame.erase(it->feature_per_frame.begin() + j);
+            // 只在次新帧中有观测，则删除特征点
             if (it->feature_per_frame.size() == 0)
                 feature.erase(it);
         }
