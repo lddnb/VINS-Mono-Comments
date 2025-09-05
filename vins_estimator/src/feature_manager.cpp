@@ -160,6 +160,11 @@ vector<pair<Vector3d, Vector3d>> FeatureManager::getCorresponding(int frame_coun
     return corres;
 }
 
+/**
+ * @brief 设置路标点的深度估计值
+ * 
+ * @param x 
+ */
 void FeatureManager::setDepth(const VectorXd &x)
 {
     int feature_index = -1;
@@ -171,6 +176,7 @@ void FeatureManager::setDepth(const VectorXd &x)
 
         it_per_id.estimated_depth = 1.0 / x(++feature_index);
         //ROS_INFO("feature id %d , start_frame %d, depth %f ", it_per_id->feature_id, it_per_id-> start_frame, it_per_id->estimated_depth);
+        // 深度小于零，认为是求解失败，标记为2
         if (it_per_id.estimated_depth < 0)
         {
             it_per_id.solve_flag = 2;
@@ -180,6 +186,10 @@ void FeatureManager::setDepth(const VectorXd &x)
     }
 }
 
+/**
+ * @brief 删除求解失败的路标点
+ * 
+ */
 void FeatureManager::removeFailures()
 {
     for (auto it = feature.begin(), it_next = feature.begin();

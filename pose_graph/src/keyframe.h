@@ -77,23 +77,23 @@ public:
 	double time_stamp; 
 	int index;
 	int local_index;
-	Eigen::Vector3d vio_T_w_i; 
-	Eigen::Matrix3d vio_R_w_i; 
+	Eigen::Vector3d vio_T_w_i; 												// VIO估计的平移，T_w_i
+	Eigen::Matrix3d vio_R_w_i; 												// VIO估计的旋转，R_w_i
 	Eigen::Vector3d T_w_i;
 	Eigen::Matrix3d R_w_i;
 	Eigen::Vector3d origin_vio_T;		
 	Eigen::Matrix3d origin_vio_R;
 	cv::Mat image;
 	cv::Mat thumbnail;
-	vector<cv::Point3f> point_3d; 
-	vector<cv::Point2f> point_2d_uv;
-	vector<cv::Point2f> point_2d_norm;
-	vector<double> point_id;
-	vector<cv::KeyPoint> keypoints;
-	vector<cv::KeyPoint> keypoints_norm;
-	vector<cv::KeyPoint> window_keypoints;
-	vector<BRIEF::bitset> brief_descriptors;
-	vector<BRIEF::bitset> window_brief_descriptors;
+	vector<cv::Point3f> point_3d; 										// 世界系下三维坐标，T_w_p
+	vector<cv::Point2f> point_2d_uv;									// 图像像素坐标
+	vector<cv::Point2f> point_2d_norm;								// 相机归一化系下的二维坐标，T_c_p
+	vector<double> point_id;													// 特征点id
+	vector<cv::KeyPoint> keypoints;										// fast特征点像素坐标
+	vector<cv::KeyPoint> keypoints_norm;							// fast特征点归一化坐标
+	vector<cv::KeyPoint> window_keypoints;						// 路标点像素坐标
+	vector<BRIEF::bitset> brief_descriptors;					// fast特征点描述子
+	vector<BRIEF::bitset> window_brief_descriptors;		// 路标点描述子
 	bool has_fast_point;
 	int sequence;
 

@@ -66,6 +66,10 @@ CameraPoseVisualization cameraposevisual(1, 0, 0, 1);
 Eigen::Vector3d last_t(-100, -100, -100);
 double last_image_time = -1;
 
+/**
+ * @brief 创建新位姿图
+ * 
+ */
 void new_sequence()
 {
     printf("new sequence\n");
@@ -90,8 +94,14 @@ void new_sequence()
     m_buf.unlock();
 }
 
+/**
+ * @brief 图像回调函数
+ * 
+ * @param image_msg 
+ */
 void image_callback(const sensor_msgs::ImageConstPtr &image_msg)
 {
+    // 缓存图像
     //ROS_INFO("image_callback!");
     if(!LOOP_CLOSURE)
         return;
@@ -111,8 +121,14 @@ void image_callback(const sensor_msgs::ImageConstPtr &image_msg)
     last_image_time = image_msg->header.stamp.toSec();
 }
 
+/**
+ * @brief 特征点回调函数
+ * 
+ * @param point_msg 
+ */
 void point_callback(const sensor_msgs::PointCloudConstPtr &point_msg)
 {
+    // 缓存特征点
     //ROS_INFO("point_callback!");
     if(!LOOP_CLOSURE)
         return;
@@ -131,8 +147,14 @@ void point_callback(const sensor_msgs::PointCloudConstPtr &point_msg)
     */
 }
 
+/**
+ * @brief 位姿回调函数
+ * 
+ * @param pose_msg 
+ */
 void pose_callback(const nav_msgs::Odometry::ConstPtr &pose_msg)
 {
+    // 缓存位姿
     //ROS_INFO("pose_callback!");
     if(!LOOP_CLOSURE)
         return;
@@ -150,8 +172,14 @@ void pose_callback(const nav_msgs::Odometry::ConstPtr &pose_msg)
     */
 }
 
+/**
+ * @brief IMU递推位姿的回调函数
+ * 
+ * @param forward_msg 
+ */
 void imu_forward_callback(const nav_msgs::Odometry::ConstPtr &forward_msg)
 {
+    // 转换成位姿图优化后的位姿
     if (VISUALIZE_IMU_FORWARD)
     {
         Vector3d vio_t(forward_msg->pose.pose.position.x, forward_msg->pose.pose.position.y, forward_msg->pose.pose.position.z);
@@ -198,8 +226,14 @@ void relo_relative_pose_callback(const nav_msgs::Odometry::ConstPtr &pose_msg)
 
 }
 
+/**
+ * @brief VIO回调函数
+ * 
+ * @param pose_msg 
+ */
 void vio_callback(const nav_msgs::Odometry::ConstPtr &pose_msg)
 {
+    // 转换成位姿图优化后的位姿
     //ROS_INFO("vio_callback!");
     Vector3d vio_t(pose_msg->pose.pose.position.x, pose_msg->pose.pose.position.y, pose_msg->pose.pose.position.z);
     Quaterniond vio_q;
@@ -226,6 +260,7 @@ void vio_callback(const nav_msgs::Odometry::ConstPtr &pose_msg)
         cameraposevisual.publish_by(pub_camera_pose_visual, pose_msg->header);
     }
 
+    // 发布所有滑窗的关键帧用于可视化
     odometry_buf.push(vio_t_cam);
     if (odometry_buf.size() > 10)
     {
@@ -278,8 +313,14 @@ void vio_callback(const nav_msgs::Odometry::ConstPtr &pose_msg)
     }
 }
 
+/**
+ * @brief 外参回调函数
+ * 
+ * @param pose_msg 
+ */
 void extrinsic_callback(const nav_msgs::Odometry::ConstPtr &pose_msg)
 {
+    // 更新外参
     m_process.lock();
     tic = Vector3d(pose_msg->pose.pose.position.x,
                    pose_msg->pose.pose.position.y,
@@ -291,6 +332,10 @@ void extrinsic_callback(const nav_msgs::Odometry::ConstPtr &pose_msg)
     m_process.unlock();
 }
 
+/**
+ * @brief 主要处理流程
+ * 
+ */
 void process()
 {
     if (!LOOP_CLOSURE)
@@ -302,6 +347,7 @@ void process()
         nav_msgs::Odometry::ConstPtr pose_msg = NULL;
 
         // find out the messages with same time stamp
+        // 取出时间戳相同的图像、位姿和路标点
         m_buf.lock();
         if(!image_buf.empty() && !point_buf.empty() && !pose_buf.empty())
         {
@@ -411,10 +457,12 @@ void process()
                     //printf("u %f, v %f \n", p_2d_uv.x, p_2d_uv.y);
                 }
 
+                // 同时满足非前几帧和位移矩阵足够大的要求，才创建关键帧
                 KeyFrame* keyframe = new KeyFrame(pose_msg->header.stamp.toSec(), frame_index, T, R, image,
                                    point_3d, point_2d_uv, point_2d_normal, point_id, sequence);   
                 m_process.lock();
                 start_flag = 1;
+                // 往位姿图中添加关键帧
                 posegraph.addKeyFrame(keyframe, 1);
                 m_process.unlock();
                 frame_index++;
@@ -433,6 +481,7 @@ void command()
         return;
     while(1)
     {
+        // 保存位姿图
         char c = getchar();
         if (c == 's')
         {
@@ -482,6 +531,7 @@ int main(int argc, char **argv)
     {
         ROW = fsSettings["image_height"];
         COL = fsSettings["image_width"];
+        // 加载词袋
         std::string pkg_path = ros::package::getPath("pose_graph");
         string vocabulary_file = pkg_path + "/../support_files/brief_k10L6.bin";
         cout << "vocabulary_file" << vocabulary_file << endl;
@@ -489,6 +539,7 @@ int main(int argc, char **argv)
 
         BRIEF_PATTERN_FILE = pkg_path + "/../support_files/brief_pattern.yml";
         cout << "BRIEF_PATTERN_FILE" << BRIEF_PATTERN_FILE << endl;
+        // 加载相机模型
         m_camera = camodocal::CameraFactory::instance()->generateCameraFromYamlFile(config_file.c_str());
 
         fsSettings["image_topic"] >> IMAGE_TOPIC;        
@@ -508,6 +559,7 @@ int main(int argc, char **argv)
         fout.close();
         fsSettings.release();
 
+        // 加载已有的位姿图
         if (LOAD_PREVIOUS_POSE_GRAPH)
         {
             printf("load pose graph\n");
@@ -526,6 +578,14 @@ int main(int argc, char **argv)
 
     fsSettings.release();
 
+    // 订阅数据
+    // 1. imu频率的odom
+    // 2. 当前滑窗最新帧的位姿
+    // 3. 当前帧的图像
+    // 4. 滑窗第8帧的位姿
+    // 5. 外参
+    // 6. 滑窗第8帧的特征点
+    // 7. 重定位的相对位姿
     ros::Subscriber sub_imu_forward = n.subscribe("/vins_estimator/imu_propagate", 2000, imu_forward_callback);
     ros::Subscriber sub_vio = n.subscribe("/vins_estimator/odometry", 2000, vio_callback);
     ros::Subscriber sub_image = n.subscribe(IMAGE_TOPIC, 2000, image_callback);
@@ -534,12 +594,14 @@ int main(int argc, char **argv)
     ros::Subscriber sub_point = n.subscribe("/vins_estimator/keyframe_point", 2000, point_callback);
     ros::Subscriber sub_relo_relative_pose = n.subscribe("/vins_estimator/relo_relative_pose", 2000, relo_relative_pose_callback);
 
+    // 发布数据
     pub_match_img = n.advertise<sensor_msgs::Image>("match_image", 1000);
     pub_camera_pose_visual = n.advertise<visualization_msgs::MarkerArray>("camera_pose_visual", 1000);
     pub_key_odometrys = n.advertise<visualization_msgs::Marker>("key_odometrys", 1000);
     pub_vio_path = n.advertise<nav_msgs::Path>("no_loop_path", 1000);
     pub_match_points = n.advertise<sensor_msgs::PointCloud>("match_points", 100);
 
+    // 处理线程和键盘指令线程
     std::thread measurement_process;
     std::thread keyboard_command_process;
 

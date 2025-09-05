@@ -365,8 +365,10 @@ void process()
                 xyz_uv_velocity << x, y, z, p_u, p_v, velocity_x, velocity_y;
                 image[feature_id].emplace_back(camera_id,  xyz_uv_velocity);
             }
+            // 处理图像，VIO流程
             estimator.processImage(image, img_msg->header);
 
+            // 状态发布
             double whole_t = t_s.toc();
             printStatistics(estimator, whole_t);
             std_msgs::Header header = img_msg->header;

@@ -212,10 +212,12 @@ void Estimator::processImage(const map<int, vector<pair<int, Eigen::Matrix<doubl
     }
     else
     {
+        // 初始化完成后的正常求解状态
         TicToc t_solve;
         solveOdometry();
         ROS_DEBUG("solver costs: %fms", t_solve.toc());
 
+        // 失效检测
         if (failureDetection())
         {
             ROS_WARN("failure detection!");
@@ -708,18 +710,27 @@ void Estimator::double2vector()
     }
 }
 
+/**
+ * @brief 检查系统是否失效
+ * 
+ * @return true 
+ * @return false 
+ */
 bool Estimator::failureDetection()
 {
+    // 与上一帧跟踪的特征点过少
     if (f_manager.last_track_num < 2)
     {
         ROS_INFO(" little feature %d", f_manager.last_track_num);
         //return true;
     }
+    // 估计的加速度零偏过大
     if (Bas[WINDOW_SIZE].norm() > 2.5)
     {
         ROS_INFO(" big IMU acc bias estimation %f", Bas[WINDOW_SIZE].norm());
         return true;
     }
+    // 估计的角速度零偏过大
     if (Bgs[WINDOW_SIZE].norm() > 1.0)
     {
         ROS_INFO(" big IMU gyr bias estimation %f", Bgs[WINDOW_SIZE].norm());
@@ -732,6 +743,7 @@ bool Estimator::failureDetection()
         return true;
     }
     */
+    //平移过大或者z轴漂移
     Vector3d tmp_P = Ps[WINDOW_SIZE];
     if ((tmp_P - last_P).norm() > 5)
     {
@@ -743,6 +755,7 @@ bool Estimator::failureDetection()
         ROS_INFO(" big z translation");
         return true; 
     }
+    // 角度变化过大
     Matrix3d tmp_R = Rs[WINDOW_SIZE];
     Matrix3d delta_R = tmp_R.transpose() * last_R;
     Quaterniond delta_Q(delta_R);

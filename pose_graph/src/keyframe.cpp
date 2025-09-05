@@ -34,6 +34,7 @@ KeyFrame::KeyFrame(double _time_stamp, int _index, Vector3d &_vio_T_w_i, Matrix3
 	has_fast_point = false;
 	loop_info << 0, 0, 0, 0, 0, 0, 0, 0;
 	sequence = _sequence;
+	// 创建KF时自动计算BRIEF描述子
 	computeWindowBRIEFPoint();
 	computeBRIEFPoint();
 	if(!DEBUG_IMAGE)
@@ -71,19 +72,28 @@ KeyFrame::KeyFrame(double _time_stamp, int _index, Vector3d &_vio_T_w_i, Matrix3
 	brief_descriptors = _brief_descriptors;
 }
 
-
+/**
+ * @brief 计算BRIEF描述子
+ * 
+ */
 void KeyFrame::computeWindowBRIEFPoint()
 {
 	BriefExtractor extractor(BRIEF_PATTERN_FILE.c_str());
 	for(int i = 0; i < (int)point_2d_uv.size(); i++)
 	{
+			// 用像素坐标来计算
 	    cv::KeyPoint key;
 	    key.pt = point_2d_uv[i];
 	    window_keypoints.push_back(key);
 	}
+	// 提取后存放至window_brief_descriptors
 	extractor(image, window_keypoints, window_brief_descriptors);
 }
 
+/**
+ * @brief 额外提取fast特征点并计算描述子
+ * 
+ */
 void KeyFrame::computeBRIEFPoint()
 {
 	BriefExtractor extractor(BRIEF_PATTERN_FILE.c_str());
@@ -102,6 +112,7 @@ void KeyFrame::computeBRIEFPoint()
 		}
 	}
 	extractor(image, keypoints, brief_descriptors);
+	// 计算fast特征点在相机归一化坐标下的坐标
 	for (int i = 0; i < (int)keypoints.size(); i++)
 	{
 		Eigen::Vector3d tmp_p;
@@ -255,7 +266,13 @@ void KeyFrame::PnPRANSAC(const vector<cv::Point2f> &matched_2d_old_norm,
 
 }
 
-
+/**
+ * @brief 两帧做描述子匹配
+ * 
+ * @param old_kf 
+ * @return true 
+ * @return false 
+ */
 bool KeyFrame::findConnection(KeyFrame* old_kf)
 {
 	TicToc tmp_t;
@@ -297,6 +314,7 @@ bool KeyFrame::findConnection(KeyFrame* old_kf)
 	        cv::imwrite( path.str().c_str(), loop_match_img);
 	    }
 	#endif
+	// 剔除错误匹配
 	//printf("search by des\n");
 	searchByBRIEFDes(matched_2d_old, matched_2d_old_norm, status, old_kf->brief_descriptors, old_kf->keypoints, old_kf->keypoints_norm);
 	reduceVector(matched_2d_cur, status);
@@ -405,6 +423,7 @@ bool KeyFrame::findConnection(KeyFrame* old_kf)
 	double relative_yaw;
 	if ((int)matched_2d_cur.size() > MIN_LOOP_NUM)
 	{
+		// 用RANSAC PnP检测再去除误匹配的点
 		status.clear();
 	    PnPRANSAC(matched_2d_old_norm, matched_3d, status, PnP_T_old, PnP_R_old);
 	    reduceVector(matched_2d_cur, status);

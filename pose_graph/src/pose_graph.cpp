@@ -5,6 +5,7 @@ PoseGraph::PoseGraph()
     posegraph_visualization = new CameraPoseVisualization(1.0, 0.0, 1.0, 1.0);
     posegraph_visualization->setScale(0.1);
     posegraph_visualization->setLineWidth(0.01);
+    // 单独线程去做优化
 	t_optimization = std::thread(&PoseGraph::optimize4DoF, this);
     earliest_loop_index = -1;
     t_drift = Eigen::Vector3d(0, 0, 0);
@@ -56,6 +57,7 @@ void PoseGraph::addKeyFrame(KeyFrame* cur_kf, bool flag_detect_loop)
         m_drift.unlock();
     }
 
+    // 取VIO的估计值，更新后再存入cur_kf
     cur_kf->getVioPose(vio_P_cur, vio_R_cur);
     vio_P_cur = w_r_vio * vio_P_cur + w_t_vio;
     vio_R_cur = w_r_vio *  vio_R_cur;
@@ -65,6 +67,7 @@ void PoseGraph::addKeyFrame(KeyFrame* cur_kf, bool flag_detect_loop)
 	int loop_index = -1;
     if (flag_detect_loop)
     {
+        // 检测回环
         TicToc tmp_t;
         loop_index = detectLoop(cur_kf, cur_kf->index);
     }
@@ -72,6 +75,7 @@ void PoseGraph::addKeyFrame(KeyFrame* cur_kf, bool flag_detect_loop)
     {
         addKeyFrameIntoVoc(cur_kf);
     }
+    // 搜到了回环
 	if (loop_index != -1)
 	{
         //printf(" %d detect loop with %d \n", cur_kf->index, loop_index);
@@ -301,6 +305,13 @@ KeyFrame* PoseGraph::getKeyFrame(int index)
         return NULL;
 }
 
+/**
+ * @brief 检测回环
+ * 
+ * @param keyframe 
+ * @param frame_index 
+ * @return int 
+ */
 int PoseGraph::detectLoop(KeyFrame* keyframe, int frame_index)
 {
     // put image into image_pool; for visualization
@@ -316,11 +327,13 @@ int PoseGraph::detectLoop(KeyFrame* keyframe, int frame_index)
     //first query; then add this frame into database!
     QueryResults ret;
     TicToc t_query;
+    // 词袋查询接口，最多返回4个备选KF，查找距离当前至少50帧的KF，这里只用了fast特征点
     db.query(keyframe->brief_descriptors, ret, 4, frame_index - 50);
     //printf("query time: %f", t_query.toc());
     //cout << "Searching for Image " << frame_index << ". " << ret << endl;
 
     TicToc t_add;
+    // 把当前帧的特征描述符添加到数据库中
     db.add(keyframe->brief_descriptors);
     //printf("add feature time: %f", t_add.toc());
     // ret[0] is the nearest neighbour's score. threshold change with neighour score
@@ -344,6 +357,7 @@ int PoseGraph::detectLoop(KeyFrame* keyframe, int frame_index)
             cv::hconcat(loop_result, tmp_image, loop_result);
         }
     }
+    // 找到回环且评分足够高
     // a good match with its nerghbour
     if (ret.size() >= 1 &&ret[0].Score > 0.05)
         for (unsigned int i = 1; i < ret.size(); i++)
@@ -370,6 +384,7 @@ int PoseGraph::detectLoop(KeyFrame* keyframe, int frame_index)
         cv::waitKey(20);
     }
 */
+    // 取index最小帧的作为候选回环返回
     if (find_loop && frame_index > 50)
     {
         int min_index = -1;
