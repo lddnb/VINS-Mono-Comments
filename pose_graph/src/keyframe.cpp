@@ -488,6 +488,7 @@ bool KeyFrame::findConnection(KeyFrame* old_kf)
 	    #endif
 	}
 
+	// 满足最小匹配特征数量
 	if ((int)matched_2d_cur.size() > MIN_LOOP_NUM)
 	{
 	    relative_t = PnP_R_old.transpose() * (origin_vio_T - PnP_T_old);
@@ -496,9 +497,11 @@ bool KeyFrame::findConnection(KeyFrame* old_kf)
 	    //printf("PNP relative\n");
 	    //cout << "pnp relative_t " << relative_t.transpose() << endl;
 	    //cout << "pnp relative_yaw " << relative_yaw << endl;
+			// 相对角度和位移小于阈值，则返回true
 	    if (abs(relative_yaw) < 30.0 && relative_t.norm() < 20.0)
 	    {
 
+				// 相对位姿放入 loop_info 中
 	    	has_loop = true;
 	    	loop_index = old_kf->index;
 	    	loop_info << relative_t.x(), relative_t.y(), relative_t.z(),
