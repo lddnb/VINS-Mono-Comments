@@ -621,6 +621,8 @@ void Estimator::vector2double()
  */
 void Estimator::double2vector()
 {
+    //! 零空间维护
+    // 保存优化前第0帧的原始位姿
     Vector3d origin_R0 = Utility::R2ypr(Rs[0]);
     Vector3d origin_P0 = Ps[0];
 
@@ -630,13 +632,17 @@ void Estimator::double2vector()
         origin_P0 = last_P0;
         failure_occur = 0;
     }
+    // 获取优化后第0帧的位姿
     Vector3d origin_R00 = Utility::R2ypr(Quaterniond(para_Pose[0][6],
                                                       para_Pose[0][3],
                                                       para_Pose[0][4],
                                                       para_Pose[0][5]).toRotationMatrix());
+    // 计算yaw差值
     double y_diff = origin_R0.x() - origin_R00.x();
     //TODO
+    // 转化为旋转矩阵
     Matrix3d rot_diff = Utility::ypr2R(Vector3d(y_diff, 0, 0));
+    // pitch角接近±90，处理欧拉角万向节锁，直接用旋转矩阵计算
     if (abs(abs(origin_R0.y()) - 90) < 1.0 || abs(abs(origin_R00.y()) - 90) < 1.0)
     {
         ROS_DEBUG("euler singular point!");
@@ -646,6 +652,7 @@ void Estimator::double2vector()
                                        para_Pose[0][5]).toRotationMatrix().transpose();
     }
 
+    // 保证第0帧的yaw角不变，同时平移是增加优化后相对于第0帧的增量，即第0帧平移也不变
     for (int i = 0; i <= WINDOW_SIZE; i++)
     {
 
